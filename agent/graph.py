@@ -16,6 +16,8 @@ conditional router following the same shape.
 """
 from __future__ import annotations
 
+import ast
+import json
 import os
 import re
 from dataclasses import dataclass, field
@@ -56,11 +58,19 @@ class AgentState:
 
 def llm() -> ChatOpenAI:
     """Chat client pointed at VLLM_BASE_URL (your local vLLM by default)."""
+    kwargs: dict[str, Any] = {
+        "model": VLLM_MODEL,
+        "base_url": VLLM_BASE_URL,
+        "api_key": LLM_API_KEY,
+        "temperature": 0.0,
+        "max_tokens": 384,
+    }
+    if "qwen3" in VLLM_MODEL.lower() and "api.openai.com" not in VLLM_BASE_URL:
+        # Qwen3 enables reasoning by default on vLLM; turn it off so nodes
+        # return compact SQL / JSON instead of long <think> traces.
+        kwargs["extra_body"] = {"chat_template_kwargs": {"enable_thinking": False}}
     return ChatOpenAI(
-        model=VLLM_MODEL,
-        base_url=VLLM_BASE_URL,
-        api_key=LLM_API_KEY,
-        temperature=0.0,
+        **kwargs,
     )
 
 
@@ -78,7 +88,99 @@ def _extract_sql(text: str) -> str:
     otherwise the whole reply. You may need to harden this for your prompts.
     """
     fenced = re.search(r"```(?:sql)?\s*(.*?)```", text, re.DOTALL | re.IGNORECASE)
-    return (fenced.group(1) if fenced else text).strip()
+    candidate = fenced.group(1) if fenced else text
+    candidate = re.sub(r"<think>.*?</think>", "", candidate, flags=re.DOTALL | re.IGNORECASE).strip()
+
+    statements = re.findall(r"(?is)\b(?:with|select)\b.*?(?:;|$)", candidate)
+    if statements:
+        return statements[-1].strip()
+    return candidate.strip()
+
+
+def _extract_json_object(text: str) -> dict[str, Any]:
+    """Pull a JSON-like object out of a model reply."""
+    fenced = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL | re.IGNORECASE)
+    candidate = fenced.group(1) if fenced else None
+    if candidate is None:
+        match = re.search(r"\{.*\}", text, re.DOTALL)
+        candidate = match.group(0) if match else text.strip()
+
+    try:
+        data = json.loads(candidate)
+    except json.JSONDecodeError:
+        data = ast.literal_eval(candidate)
+    if not isinstance(data, dict):
+        raise ValueError("verifier reply did not contain an object")
+    return data
+
+
+def _execution_issue_hint(error: str) -> str:
+    """Turn raw sqlite errors into a more actionable revise hint."""
+    table_match = re.search(r"no such table: ([^\s]+)", error, re.IGNORECASE)
+    if table_match:
+        return (
+            f"The query references a table named '{table_match.group(1)}' that does not exist. "
+            "Use only exact table names from the schema and rewrite the joins accordingly."
+        )
+    column_match = re.search(r"no such column: ([^\s]+)", error, re.IGNORECASE)
+    if column_match:
+        return (
+            f"The query references a column named '{column_match.group(1)}' that does not exist. "
+            "Use only exact column names from the schema and fix the select, filter, or join clauses."
+        )
+    return error
+
+
+def _question_entities(question: str) -> list[str]:
+    entities: list[str] = []
+    for m in re.finditer(r"'([^']+)'|\"([^\"]+)\"", question):
+        entity = (m.group(1) or m.group(2) or "").strip()
+        if entity:
+            entities.append(entity)
+    for m in re.finditer(r"\b([A-Z][A-Za-z0-9_.-]+)'s\b", question):
+        entities.append(m.group(1))
+    return entities
+
+
+def _heuristic_verify_issue(state: AgentState) -> str | None:
+    """Catch the obvious failure modes the tiny stand-in model misses."""
+    execution = state.execution
+    if execution is None:
+        return "No execution result was produced."
+    if not execution.ok:
+        return _execution_issue_hint(execution.error or "SQL execution failed.")
+
+    sql_lower = state.sql.lower()
+    columns_lower = " ".join((execution.columns or [])).lower()
+    observed_text = f"{sql_lower} {columns_lower}"
+    entities = [e for e in _question_entities(state.question) if len(e) >= 3]
+    for entity in entities:
+        if entity.lower() not in sql_lower:
+            return f"The query does not filter for the requested entity '{entity}'."
+
+    aggregate_intent = (
+        "how many" in state.question.lower()
+        or "average" in state.question.lower()
+        or "percentage" in state.question.lower()
+        or "percent" in state.question.lower()
+        or "difference" in state.question.lower()
+        or "total" in state.question.lower()
+    )
+    if aggregate_intent and not re.search(r"\b(count|avg|sum|min|max)\s*\(", sql_lower):
+        return "The question asks for an aggregate, but the SQL does not compute one."
+
+    if execution.row_count == 0 and not aggregate_intent:
+        return "The query returned zero rows and likely did not answer the question."
+
+    question_lower = state.question.lower()
+    if ("superpower" in question_lower or "super power" in question_lower) and "power" not in observed_text:
+        return "The question asks about superpowers, but the query does not retrieve any power-related fields."
+    if "coordinate" in question_lower and not ("lat" in observed_text and "lng" in observed_text):
+        return "The question asks for coordinates, but the query does not retrieve latitude and longitude."
+    if "location" in question_lower and not any(token in observed_text for token in ("location", "lat", "lng")):
+        return "The question asks for a location, but the query does not retrieve location-related fields."
+
+    return None
 
 
 def generate_sql_node(state: AgentState) -> dict:
@@ -124,7 +226,45 @@ def verify_node(state: AgentState) -> dict:
     What counts as "not plausible" is yours to define - see the Phase 3 targets
     in the README.
     """
-    raise NotImplementedError("Implement in Phase 3")
+    response = llm().invoke([
+        ("system", prompts.VERIFY_SYSTEM),
+        ("user", prompts.VERIFY_USER.format(
+            question=state.question,
+            schema=state.schema,
+            sql=state.sql,
+            execution=state.execution.render() if state.execution else "No execution result.",
+        )),
+    ])
+
+    try:
+        payload = _extract_json_object(response.content)
+        ok = bool(payload.get("ok", False))
+        issue = str(payload.get("issue", "")).strip()
+    except Exception:  # noqa: BLE001
+        ok = False
+        if state.execution is None:
+            issue = "No execution result was produced."
+        elif not state.execution.ok:
+            issue = state.execution.error or "SQL execution failed."
+        elif state.execution.row_count == 0:
+            issue = "Query returned zero rows and likely did not answer the question."
+        else:
+            issue = "Verifier response was not parseable; revise the SQL conservatively."
+
+    heuristic_issue = _heuristic_verify_issue(state)
+    if heuristic_issue is not None:
+        ok = False
+        issue = heuristic_issue
+
+    return {
+        "verify_ok": ok,
+        "verify_issue": issue,
+        "history": state.history + [{
+            "node": "verify",
+            "ok": ok,
+            "issue": issue,
+        }],
+    }
 
 
 def revise_node(state: AgentState) -> dict:
@@ -137,7 +277,26 @@ def revise_node(state: AgentState) -> dict:
 
     Return: {"sql": <str>, "iteration": state.iteration + 1, ...}.
     """
-    raise NotImplementedError("Implement in Phase 3")
+    response = llm().invoke([
+        ("system", prompts.REVISE_SYSTEM),
+        ("user", prompts.REVISE_USER.format(
+            schema=state.schema,
+            question=state.question,
+            sql=state.sql,
+            execution=state.execution.render() if state.execution else "No execution result.",
+            issue=state.verify_issue,
+        )),
+    ])
+    sql = _extract_sql(response.content)
+    return {
+        "sql": sql,
+        "iteration": state.iteration + 1,
+        "history": state.history + [{
+            "node": "revise",
+            "issue": state.verify_issue,
+            "sql": sql,
+        }],
+    }
 
 
 def route_after_verify(state: AgentState) -> str:
@@ -146,7 +305,9 @@ def route_after_verify(state: AgentState) -> str:
     Two reasons to end: the verifier was happy (state.verify_ok), or you've hit
     the iteration cap (state.iteration >= MAX_ITERATIONS). Otherwise, revise.
     """
-    raise NotImplementedError("Implement in Phase 3")
+    if state.verify_ok or state.iteration >= MAX_ITERATIONS:
+        return "end"
+    return "revise"
 
 
 # ---- Graph wiring -----------------------------------------------------

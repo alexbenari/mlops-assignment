@@ -35,7 +35,7 @@ app = FastAPI()
 class AnswerRequest(BaseModel):
     question: str
     db: str
-    tags: dict[str, str] = {}
+    tags: dict[str, Any] = {}
 
 
 class AnswerResponse(BaseModel):
@@ -55,9 +55,15 @@ def health() -> dict[str, str]:
 @app.post("/answer", response_model=AnswerResponse)
 def answer(req: AnswerRequest) -> AnswerResponse:
     state = AgentState(question=req.question, db_id=req.db)
+    metadata = dict(req.tags)
+    langfuse_tags = [f"db:{req.db}"]
+    explicit_langfuse_tags = metadata.get("langfuse_tags")
+    if isinstance(explicit_langfuse_tags, list):
+        langfuse_tags.extend(str(tag) for tag in explicit_langfuse_tags)
+    metadata["langfuse_tags"] = langfuse_tags
     config: dict[str, Any] = {
         "callbacks": [_lf_handler] if _lf_handler is not None else [],
-        "metadata": req.tags,
+        "metadata": metadata,
     }
     try:
         final = graph.invoke(state, config=config)

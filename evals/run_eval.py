@@ -17,6 +17,7 @@ import json
 import sqlite3
 import time
 from pathlib import Path
+from typing import Any
 
 import httpx
 
@@ -56,9 +57,81 @@ def matches(gold_rows: list[tuple] | None, pred_rows: list[tuple] | None) -> boo
 
 # ---------- Implement these (Phase 5) ----------------------------------
 
-def eval_one(question: dict, agent_url: str) -> dict:
+def _parse_metadata_tag(raw: str) -> tuple[str, str]:
+    if "=" not in raw:
+        raise argparse.ArgumentTypeError(f"metadata tag must be KEY=VALUE, got: {raw}")
+    key, value = raw.split("=", 1)
+    key = key.strip()
+    if not key:
+        raise argparse.ArgumentTypeError(f"metadata tag key cannot be empty: {raw}")
+    return key, value
+
+
+def _attempts_from_history(history: list[dict[str, Any]], final_sql: str) -> list[str]:
+    attempts = [
+        str(step["sql"]).strip()
+        for step in history
+        if step.get("node") in {"generate_sql", "revise"} and step.get("sql")
+    ]
+    final_sql = final_sql.strip()
+    if final_sql and (not attempts or attempts[-1] != final_sql):
+        attempts.append(final_sql)
+    return attempts
+
+
+def eval_one(
+    question: dict,
+    agent_url: str,
+    metadata_tags: dict[str, str] | None = None,
+    langfuse_tags: list[str] | None = None,
+) -> dict:
     """Score one question. Return a dict capturing per-iteration correctness."""
-    raise NotImplementedError("Phase 5")
+    gold_ok, gold_rows, gold_error = run_sql(question["db_id"], question["gold_sql"])
+
+    request_tags: dict[str, Any] = dict(metadata_tags or {})
+    if langfuse_tags:
+        request_tags["langfuse_tags"] = list(langfuse_tags)
+
+    payload: dict[str, Any] = {
+        "question": question["question"],
+        "db": question["db_id"],
+    }
+    if request_tags:
+        payload["tags"] = request_tags
+
+    t0 = time.monotonic()
+    response = httpx.post(agent_url, json=payload, timeout=180.0)
+    elapsed = time.monotonic() - t0
+    response.raise_for_status()
+    body = response.json()
+
+    history = body.get("history", [])
+    attempts: list[dict[str, Any]] = []
+    for idx, sql in enumerate(_attempts_from_history(history, body.get("sql", ""))):
+        pred_ok, pred_rows, pred_error = run_sql(question["db_id"], sql)
+        attempts.append({
+            "iteration": idx,
+            "sql": sql,
+            "ok": pred_ok,
+            "error": pred_error,
+            "correct": bool(gold_ok and pred_ok and matches(gold_rows, pred_rows)),
+        })
+
+    final_correct = attempts[-1]["correct"] if attempts else False
+    return {
+        "question": question["question"],
+        "db_id": question["db_id"],
+        "gold_sql": question["gold_sql"],
+        "gold_ok": gold_ok,
+        "gold_error": gold_error,
+        "final_sql": body.get("sql", ""),
+        "final_ok": body.get("ok", False),
+        "final_error": body.get("error"),
+        "iterations": body.get("iterations", 0),
+        "latency_seconds": elapsed,
+        "final_correct": final_correct,
+        "attempts": attempts,
+    }
 
 
 def summarize(results: list[dict]) -> dict:
@@ -70,7 +143,33 @@ def summarize(results: list[dict]) -> dict:
     The agent stopped emitting; whatever it had at termination is what
     would have been served had we polled at iteration k.
     """
-    raise NotImplementedError("Phase 5")
+    total = len(results)
+    max_attempts = max((len(r.get("attempts", [])) for r in results), default=0)
+
+    per_iteration_accuracy: dict[str, float] = {}
+    for idx in range(max_attempts):
+        correct = 0
+        for result in results:
+            attempts = result.get("attempts", [])
+            if not attempts:
+                continue
+            carried = attempts[idx] if idx < len(attempts) else attempts[-1]
+            correct += int(bool(carried.get("correct", False)))
+        per_iteration_accuracy[f"iter_{idx}"] = (correct / total) if total else 0.0
+
+    return {
+        "questions": total,
+        "final_accuracy": (
+            sum(int(bool(r.get("final_correct", False))) for r in results) / total
+            if total
+            else 0.0
+        ),
+        "per_iteration_accuracy": per_iteration_accuracy,
+        "avg_iterations": (
+            sum(int(r.get("iterations", 0)) for r in results) / total if total else 0.0
+        ),
+        "revised_questions": sum(int(int(r.get("iterations", 0)) > 1) for r in results),
+    }
 
 
 # ---------- Main (provided) --------------------------------------------
@@ -80,16 +179,31 @@ def main() -> None:
     parser.add_argument("--eval-set", type=Path, default=DEFAULT_EVAL_FILE)
     parser.add_argument("--out", type=Path, default=DEFAULT_OUT_FILE)
     parser.add_argument("--agent-url", default=AGENT_URL_DEFAULT)
+    parser.add_argument(
+        "--langfuse-tag",
+        action="append",
+        default=[],
+        help="Repeatable explicit Langfuse tag to attach to each trace.",
+    )
+    parser.add_argument(
+        "--metadata-tag",
+        action="append",
+        default=[],
+        metavar="KEY=VALUE",
+        help="Repeatable metadata tag to attach to each agent request.",
+    )
     args = parser.parse_args()
 
     questions = [json.loads(line) for line in args.eval_set.read_text().splitlines() if line.strip()]
     print(f"Loaded {len(questions)} eval questions from {args.eval_set}")
+    metadata_tags = dict(_parse_metadata_tag(item) for item in args.metadata_tag)
+    langfuse_tags = list(args.langfuse_tag)
 
     results: list[dict] = []
     t0 = time.monotonic()
     for i, q in enumerate(questions, 1):
         print(f"[{i}/{len(questions)}] {q['db_id']}: {q['question'][:60]}...", flush=True)
-        results.append(eval_one(q, args.agent_url))
+        results.append(eval_one(q, args.agent_url, metadata_tags, langfuse_tags))
     elapsed = time.monotonic() - t0
 
     summary = summarize(results)
