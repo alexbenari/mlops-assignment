@@ -169,6 +169,15 @@ def _heuristic_verify_issue(state: AgentState) -> str | None:
     if aggregate_intent and not re.search(r"\b(count|avg|sum|min|max)\s*\(", sql_lower):
         return "The question asks for an aggregate, but the SQL does not compute one."
 
+    if (
+        not aggregate_intent
+        and execution.row_count > 1
+        and execution.rows is not None
+        and "distinct" not in sql_lower
+        and len({tuple(row) for row in execution.rows}) < execution.row_count
+    ):
+        return "The query returned duplicate rows; tighten the join or use DISTINCT."
+
     if execution.row_count == 0 and not aggregate_intent:
         return "The query returned zero rows and likely did not answer the question."
 
