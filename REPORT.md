@@ -35,3 +35,28 @@ This local configuration is only intended to unblock development of the agent, P
 - quantized model
 - https://docs.vllm.ai/en/latest/configuration/optimization/
 
+
+## Phase 1 serving configuration on the H100 VM
+
+Hosted vLLM launch command:
+
+```bash
+/home/ubuntu/.local/bin/uv run python -m vllm.entrypoints.openai.api_server \
+  --model Qwen/Qwen3-30B-A3B-Instruct-2507 \
+  --host 0.0.0.0 \
+  --port 8000 \
+  --reasoning-parser qwen3 \
+  --generation-config vllm \
+  --gpu-memory-utilization 0.9 \
+  --max-model-len 4096
+```
+
+Flag rationale:
+
+- `--model Qwen/Qwen3-30B-A3B-Instruct-2507`: this is the assignment target model, so all final latency and quality measurements should use it.
+- `--host 0.0.0.0`: exposes the API server on the VM so local SSH port forwarding can reach it.
+- `--port 8000`: keeps the repo's default endpoint wiring unchanged for Prometheus scraping and the agent client.
+- `--reasoning-parser qwen3`: enables the correct parser for Qwen3 reasoning-format responses on the OpenAI-compatible server.
+- `--generation-config vllm`: avoids inheriting model-side generation defaults from Hugging Face config files and keeps serving behavior explicit.
+- `--gpu-memory-utilization 0.9`: reserves substantially more GPU memory for KV cache than the local-dev setting; `0.7` failed on the H100 because the model weights and compile overhead left no cache space.
+- `--max-model-len 4096`: gives enough headroom for the agent's schema-heavy prompts without paying the extra KV-cache cost of a much larger context window.
