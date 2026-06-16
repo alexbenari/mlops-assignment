@@ -58,3 +58,37 @@ Flag rationale:
 - `--generation-config vllm`: avoids inheriting model-side generation defaults from Hugging Face config files and keeps serving behavior explicit.
 - `--gpu-memory-utilization 0.9`: reserves substantially more GPU memory for KV cache than the local-dev setting; `0.7` failed on the H100 because the model weights and compile overhead left no cache space.
 - `--max-model-len 4096`: gives enough headroom for the agent's schema-heavy prompts without paying the extra KV-cache cost of a much larger context window. Based on the data provided about expected query lengts, plus headroom. Might be optimized further later. 
+
+## Agent loop optimization: early exit on stalled revise
+
+One small graph optimization was added to the agent loop: if the `revise` step
+returns the same SQL it received, the graph now exits immediately instead of
+running another `execute -> verify` cycle on an unchanged query. This does not
+change answer quality directly; it only avoids wasted work once the loop has
+stalled.
+
+To measure the effect, I compared two full eval runs in Langfuse using trace
+latency aggregated over the 30 question traces in each run:
+
+- Baseline run tag: `propmt-tightening-6`
+- Optimized run tag: `graph-exit-after-no-revise`
+
+Langfuse comparison:
+
+- `propmt-tightening-6`: total trace latency `50.173s`, average per-question
+  trace latency `1.672s`, median `1.145s`, trace-span `51.746s`
+- `graph-exit-after-no-revise`: total trace latency `34.498s`, average
+  per-question trace latency `1.150s`, median `0.777s`, trace-span `36.060s`
+
+Observed improvement from the optimization:
+
+- Total trace latency improved by `15.675s` (`31.2%` lower)
+- Average per-question trace latency improved by `0.523s` (`31.2%` lower)
+- End-to-end trace span improved by `15.686s` (`30.3%` lower)
+
+Interpretation:
+
+- The optimization behaves as intended: it cuts wasted loop work when the
+  reviser is stuck and produces no substantive SQL change.
+- The gain is primarily a latency win, not a semantic improvement. It should be
+  understood as loop-efficiency tuning rather than prompt-quality tuning.
