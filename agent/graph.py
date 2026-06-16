@@ -53,6 +53,7 @@ class AgentState:
     verify_ok: bool = False
     verify_issue: str = ""
     iteration: int = 0
+    stalled_revision: bool = False
     history: list[dict[str, Any]] = field(default_factory=list)
 
 
@@ -124,6 +125,11 @@ def _execution_issue_hint(error: str) -> str:
             "Use only exact column names from the schema and fix the select, filter, or join clauses."
         )
     return error
+
+
+def _normalize_sql(sql: str) -> str:
+    """Collapse superficial formatting differences before comparing SQL."""
+    return re.sub(r"\s+", " ", sql).strip().rstrip(";")
 
 
 def _question_entities(question: str) -> list[str]:
@@ -292,13 +298,16 @@ def revise_node(state: AgentState) -> dict:
         )),
     ])
     sql = _extract_sql(response.content)
+    stalled_revision = _normalize_sql(sql) == _normalize_sql(state.sql)
     return {
         "sql": sql,
         "iteration": state.iteration + 1,
+        "stalled_revision": stalled_revision,
         "history": state.history + [{
             "node": "revise",
             "issue": state.verify_issue,
             "sql": sql,
+            "stalled_revision": stalled_revision,
         }],
     }
 
@@ -312,6 +321,13 @@ def route_after_verify(state: AgentState) -> str:
     if state.verify_ok or state.iteration >= MAX_ITERATIONS:
         return "end"
     return "revise"
+
+
+def route_after_revise(state: AgentState) -> str:
+    """End early when revise produced no substantive SQL change."""
+    if state.stalled_revision:
+        return "end"
+    return "execute"
 
 
 # ---- Graph wiring -----------------------------------------------------
@@ -333,7 +349,11 @@ def build_graph():
         route_after_verify,
         {"revise": "revise", "end": END},
     )
-    g.add_edge("revise", "execute")
+    g.add_conditional_edges(
+        "revise",
+        route_after_revise,
+        {"execute": "execute", "end": END},
+    )
     return g.compile()
 
 
