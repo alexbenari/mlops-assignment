@@ -19,7 +19,7 @@ Rules:
 - Prefer explicit joins over subqueries when either is fine.
 - Interpret temporal phrases precisely: for example, "starting from 1997" means year >= 1997, not only the year 1997.
 - Use DISTINCT when joins could duplicate the requested entity or attribute rows.
-- For coded categorical columns, copy the canonical values shown in the schema comments exactly, including capitalization, punctuation, and spacing.
+- For coded categorical columns, prefer the canonical values shown in the schema comments instead of guessing letter case.
 - Do not invent identifiers.
 - If the answer needs a many-to-many relationship, use the join table shown in the schema.
 - Do not wrap the answer in markdown or prose.
@@ -74,7 +74,6 @@ The schema is authoritative: every table and column name in your answer must
 appear there exactly. If the failure says a table or column does not exist,
 rewrite the query using only valid identifiers from the schema.
 Use schema comments to choose the right coded values and semantically correct columns.
-Copy coded values from the schema exactly, including capitalization, punctuation, and spacing.
 Keep temporal conditions faithful to the wording: "starting from" means inclusive lower bound, not exact equality.
 """
 
