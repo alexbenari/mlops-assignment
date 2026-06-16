@@ -46,7 +46,7 @@ the join is too loose, or when zero rows are unlikely to be a valid answer for
 the question. Mark ok=true only when the SQL and execution result look
 plausibly correct.
 
-If ok=true, issue should be empty. If ok=false, describe briefly what is wrong and what should be fixed next.
+If ok=true, keep issue short and empty if possible. If ok=false, issue must say what is wrong and what should be fixed next. The description of the issue should be clear, comprehensive and actionable. Its goal is to give enough information to fix the sql. If the SQL errored, include the error message in the issue.
 """
 
 VERIFY_USER = """Question:
