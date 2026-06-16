@@ -126,34 +126,6 @@ def _execution_issue_hint(error: str) -> str:
     return error
 
 
-def _normalize_sql(sql: str) -> str:
-    """Collapse superficial formatting differences before comparing attempts."""
-    return re.sub(r"\s+", " ", sql).strip().rstrip(";").lower()
-
-
-def _unchanged_revision_issue(state: AgentState) -> str | None:
-    """Flag revisions that repeat the previous SQL without a substantive change."""
-    if state.iteration <= 1:
-        return None
-
-    sql_attempts = [
-        entry["sql"]
-        for entry in state.history
-        if entry.get("node") in {"generate_sql", "revise"} and isinstance(entry.get("sql"), str)
-    ]
-    if len(sql_attempts) < 2:
-        return None
-
-    current_sql = _normalize_sql(sql_attempts[-1])
-    previous_sql = _normalize_sql(sql_attempts[-2])
-    if current_sql == previous_sql:
-        return (
-            "The revised query is unchanged from the previous attempt. "
-            "Make a substantive fix instead of repeating the same SQL."
-        )
-    return None
-
-
 def _question_entities(question: str) -> list[str]:
     entities: list[str] = []
     for m in re.finditer(r"'([^']+)'|\"([^\"]+)\"", question):
@@ -170,11 +142,6 @@ def _heuristic_verify_issue(state: AgentState) -> str | None:
     execution = state.execution
     if execution is None:
         return "No execution result was produced."
-
-    unchanged_revision_issue = _unchanged_revision_issue(state)
-    if unchanged_revision_issue is not None:
-        return unchanged_revision_issue
-
     if not execution.ok:
         return _execution_issue_hint(execution.error or "SQL execution failed.")
 
