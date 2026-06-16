@@ -20,4 +20,4 @@ exec "$UV_BIN" run python -m vllm.entrypoints.openai.api_server \
     --reasoning-parser qwen3 \
     --generation-config vllm \
     --gpu-memory-utilization 0.9 \
-    --max-model-len 4096
+    --max-model-len 12288
