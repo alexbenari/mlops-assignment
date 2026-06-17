@@ -46,7 +46,7 @@ Hosted vLLM launch command:
   --reasoning-parser qwen3 \
   --generation-config vllm \
   --gpu-memory-utilization 0.9 \
-  --max-model-len 4096
+  --max-model-len 12288
 ```
 
 Flag rationale:
@@ -57,7 +57,7 @@ Flag rationale:
 - `--reasoning-parser qwen3`: enables the correct parser for Qwen3 reasoning-format responses on the OpenAI-compatible server.
 - `--generation-config vllm`: avoids inheriting model-side generation defaults from Hugging Face config files and keeps serving behavior explicit.
 - `--gpu-memory-utilization 0.9`: reserves substantially more GPU memory for KV cache than the local-dev setting; `0.7` failed on the H100 because the model weights and compile overhead left no cache space.
-- `--max-model-len 4096`: gives enough headroom for the agent's schema-heavy prompts without paying the extra KV-cache cost of a much larger context window. Based on the data provided about expected query lengts, plus headroom. Might be optimized further later. 
+- `--max-model-len 12288`: gives enough headroom for the agent's schema-heavy prompts without paying the extra KV-cache cost of a much larger context window. Based on the data provided about expected query lengts, plus headroom. Might be optimized further later. 
 
 ## Agent loop optimization: early exit on stalled revise
 
