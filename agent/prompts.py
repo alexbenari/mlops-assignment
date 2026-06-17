@@ -40,43 +40,32 @@ VERIFY_SYSTEM = """You are checking whether a SQL attempt plausibly answered a q
 Return JSON only with this shape:
 {"ok": true|false, "issue": "short explanation"}
 
-Be skeptical of plausible-looking SQL. Mark ok=false whenever there is strong
-evidence that the query answered a different question, returned the wrong shape
+Mark ok=true only when the SQL and execution result look plausibly correct for
+both content and answer shape.
+
+Mark ok=false whenever there is strong evidence that the query answered a different question, returned the wrong shape
 of answer, or used the wrong semantics even if it executed successfully.
 
 Typical reasons for ok=false:
 - the SQL errored
-- the selected columns are wrong for the question
+- zero rows are unlikely to be a valid answer
+- duplicate rows suggest the join is too loose
 - the selected columns are clearly wrong, for example they are not the ones
   requested or do not appear in the schema
 - the specified columns are a near match to schema columns but do not exactly
   match the schema because of capitalization, wording, or normalization
   differences, which indicates the SQL is not using the schema correctly
-- the answer shape is wrong: for example it returns COUNT when the question asks
-  to list rows, returns a title when the question asks for a person, returns a
-  helper measure when the question asks for a category/label, or returns an ID
-  when the question asks for an attribute
-- the aggregation grain is wrong: for example it aggregates at a broader level
-  than the question asks for, or uses the wrong denominator / subtraction
-  direction / grouping level
-- the semantic polarity is wrong: words like "normal", "within range", "fastest",
-  "lowest", "highest", "mostly", or "starting from" are not respected
-- a categorical, text, or timestamp literal looks like an approximate guess
-  instead of an exact stored value from the schema or data conventions
-- duplicate rows suggest the join is too loose
-- zero rows are unlikely to be a valid answer
-
-Mark ok=true only when the SQL and execution result look plausibly correct for
-both content and answer shape.
+- the answer shape does not match what the question asks for: for example it returns COUNT when the question asks
+  to list rows or returns an ID when the question asks for an attribute
 
 If ok=true, keep issue short and empty if possible.
-If ok=false, issue must be concrete and actionable:
-- say exactly what is wrong
+If ok=false, issue should contain a concrete and actionable explanation, specific enough to guide the next
+revision.
+- describe exactly what is wrong
+- if the SQL errored, include the error message
 - name the specific column / literal / aggregation / answer-shape problem
 - say what should be changed next
-- if the SQL errored, include the error message
-The issue should be clear, comprehensive, and specific enough to guide the next
-revision.
+
 """
 
 VERIFY_USER = """Question:
@@ -104,18 +93,8 @@ Revision rules:
 - Make the smallest substantive fix that addresses the verifier issue.
 - Keep correct parts of the previous SQL. Do not rewrite the whole query unless
   the structure is clearly wrong.
-- Do not repeat the same SQL if it already failed.
-- Do not introduce a different answer shape unless the verifier issue says the
-  current shape is wrong.
-- If the question asks to list rows, do not change the query into COUNT/AVG/SUM.
-- If the question asks for a single category/label/person/value, do not return
-  extra helper columns unless needed by the answer.
-- If the issue is a guessed literal, fix the literal exactly instead of changing
-  unrelated joins or projections.
-- If the issue is semantic polarity, fix the comparison direction or threshold
-  logic directly.
-- If the issue is aggregation, fix the grouping / denominator / ordering with
-  minimal edits instead of changing unrelated parts.
+- Do not repeat the same SQL
+- avoid sql query anti-patterns which may cause long-running queries
 
 The schema is authoritative: every table and column name in your answer must
 appear there exactly. If the failure says a table or column does not exist,
