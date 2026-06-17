@@ -18,7 +18,7 @@ from pydantic import BaseModel
 
 load_dotenv()
 
-from agent.graph import AgentState, graph  # noqa: E402
+from agent.graph import AgentState, close_llm_clients, graph  # noqa: E402
 
 # Langfuse callback handler. If keys are set we initialize it; failures
 # are NOT swallowed - a misconfigured Langfuse should not silently
@@ -47,6 +47,11 @@ class AnswerResponse(BaseModel):
     ok: bool
     error: str | None = None
     history: list[dict[str, Any]] = []
+
+
+@app.on_event("shutdown")
+async def shutdown_event() -> None:
+    await close_llm_clients()
 
 
 @app.get("/health")

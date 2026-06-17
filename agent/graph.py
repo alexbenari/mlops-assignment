@@ -21,8 +21,10 @@ import json
 import os
 import re
 from dataclasses import dataclass, field
+from functools import lru_cache
 from typing import Any
 
+import httpx
 from langchain_openai import ChatOpenAI
 from langgraph.graph import END, START, StateGraph
 
@@ -41,6 +43,45 @@ VLLM_MODEL = os.environ.get("VLLM_MODEL", "Qwen/Qwen3-30B-A3B-Instruct-2507")
 LLM_API_KEY = os.environ.get("OPENAI_API_KEY", "not-needed")
 
 
+def _int_env(name: str, default: int) -> int:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        return default
+    return value if value > 0 else default
+
+
+def _float_env(name: str, default: float) -> float:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    try:
+        value = float(raw)
+    except ValueError:
+        return default
+    return value if value > 0 else default
+
+
+_HTTP_LIMITS = httpx.Limits(
+    # Bound the agent-side socket pool so a load spike cannot exhaust the
+    # process file-descriptor limit before vLLM starts pushing back.
+    max_connections=_int_env("LLM_HTTP_MAX_CONNECTIONS", 64),
+    max_keepalive_connections=_int_env("LLM_HTTP_MAX_KEEPALIVE_CONNECTIONS", 32),
+    keepalive_expiry=_float_env("LLM_HTTP_KEEPALIVE_EXPIRY_SECONDS", 30.0),
+)
+_HTTP_TIMEOUT = httpx.Timeout(
+    connect=_float_env("LLM_HTTP_CONNECT_TIMEOUT_SECONDS", 5.0),
+    read=_float_env("LLM_HTTP_READ_TIMEOUT_SECONDS", 120.0),
+    write=_float_env("LLM_HTTP_WRITE_TIMEOUT_SECONDS", 30.0),
+    pool=_float_env("LLM_HTTP_POOL_TIMEOUT_SECONDS", 5.0),
+)
+_HTTP_CLIENT = httpx.Client(limits=_HTTP_LIMITS, timeout=_HTTP_TIMEOUT)
+_HTTP_ASYNC_CLIENT = httpx.AsyncClient(limits=_HTTP_LIMITS, timeout=_HTTP_TIMEOUT)
+
+
 @dataclass
 class AgentState:
     """State threaded through the graph. Extend with fields you need."""
@@ -57,6 +98,7 @@ class AgentState:
     history: list[dict[str, Any]] = field(default_factory=list)
 
 
+@lru_cache(maxsize=1)
 def llm() -> ChatOpenAI:
     """Chat client pointed at VLLM_BASE_URL (your local vLLM by default)."""
     kwargs: dict[str, Any] = {
@@ -64,10 +106,18 @@ def llm() -> ChatOpenAI:
         "base_url": VLLM_BASE_URL,
         "api_key": LLM_API_KEY,
         "temperature": 0.0,
+        "http_client": _HTTP_CLIENT,
+        "http_async_client": _HTTP_ASYNC_CLIENT,
     }
     return ChatOpenAI(
         **kwargs,
     )
+
+
+async def close_llm_clients() -> None:
+    """Release shared HTTP clients during server shutdown."""
+    _HTTP_CLIENT.close()
+    await _HTTP_ASYNC_CLIENT.aclose()
 
 
 # ---- Nodes ------------------------------------------------------------
