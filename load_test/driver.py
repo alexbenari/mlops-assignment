@@ -5,7 +5,7 @@ agent at the requested RPS for the requested duration, recording per-
 request latency and outcome.
 
 Run:
-    uv run python load_test/driver.py --rps 8 --duration 300
+    uv run python load_test/driver.py --rps 8 --duration 300 --langfuse-tag phase6-baseline
 
 Writes a JSON file (default results/load_test.json) with summary + raw
 per-request data.
@@ -31,9 +31,12 @@ async def fire_one(
     session: aiohttp.ClientSession,
     url: str,
     question: dict,
+    langfuse_tags: list[str],
     results: list[dict],
 ) -> None:
     payload = {"question": question["question"], "db": question["db_id"]}
+    if langfuse_tags:
+        payload["tags"] = {"langfuse_tags": list(langfuse_tags)}
     t0 = time.monotonic()
     status = "ok"
     err: str | None = None
@@ -74,7 +77,11 @@ async def drive(args: argparse.Namespace) -> None:
         next_fire = start
         while time.monotonic() < deadline:
             q = rnd.choice(questions)
-            tasks.append(asyncio.create_task(fire_one(session, args.agent_url, q, results)))
+            tasks.append(
+                asyncio.create_task(
+                    fire_one(session, args.agent_url, q, args.langfuse_tag, results)
+                )
+            )
             next_fire += interval
             sleep_for = next_fire - time.monotonic()
             if sleep_for > 0:
@@ -95,6 +102,7 @@ async def drive(args: argparse.Namespace) -> None:
     summary = {
         "requested_rps": args.rps,
         "duration_seconds": args.duration,
+        "langfuse_tags": list(args.langfuse_tag),
         "wall_clock_seconds": wall,
         "total_requests": len(results),
         "achieved_rps": (len(results) / wall) if wall > 0 else 0.0,
@@ -120,6 +128,12 @@ def main() -> None:
     p.add_argument("--duration", type=int, default=300, help="seconds to drive load")
     p.add_argument("--agent-url", default=AGENT_URL_DEFAULT)
     p.add_argument("--out", type=Path, default=DEFAULT_OUT)
+    p.add_argument(
+        "--langfuse-tag",
+        action="append",
+        default=[],
+        help="Repeatable explicit Langfuse tag to attach to each trace.",
+    )
     args = p.parse_args()
     asyncio.run(drive(args))
 
