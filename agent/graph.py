@@ -65,6 +65,9 @@ def _float_env(name: str, default: float) -> float:
     return value if value > 0 else default
 
 
+LLM_MAX_COMPLETION_TOKENS = _int_env("LLM_MAX_COMPLETION_TOKENS", 512)
+
+
 _HTTP_LIMITS = httpx.Limits(
     # Bound the agent-side socket pool so a load spike cannot exhaust the
     # process file-descriptor limit before vLLM starts pushing back.
@@ -106,6 +109,7 @@ def llm() -> ChatOpenAI:
         "base_url": VLLM_BASE_URL,
         "api_key": LLM_API_KEY,
         "temperature": 0.0,
+        "max_tokens": LLM_MAX_COMPLETION_TOKENS,
         "http_client": _HTTP_CLIENT,
         "http_async_client": _HTTP_ASYNC_CLIENT,
     }
