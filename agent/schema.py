@@ -12,6 +12,7 @@ import re
 import sqlite3
 from functools import lru_cache
 from pathlib import Path
+from typing import Any
 
 ROOT = Path(__file__).resolve().parent.parent
 DB_DIR = ROOT / "data" / "bird"
@@ -25,6 +26,20 @@ def db_path(db_id: str) -> Path:
 def _q(ident: str) -> str:
     """Double-quote a SQL identifier, escaping any embedded quotes."""
     return '"' + ident.replace('"', '""') + '"'
+
+
+def _render_foreign_key(fk: tuple[Any, ...]) -> str | None:
+    """Render a foreign key clause, tolerating incomplete SQLite metadata."""
+    ref_table = fk[2]
+    from_col = fk[3]
+    to_col = fk[4]
+    if ref_table is None or from_col is None:
+        return None
+
+    clause = f"  FOREIGN KEY ({_q(from_col)}) REFERENCES {_q(ref_table)}"
+    if to_col is not None:
+        clause += f"({_q(to_col)})"
+    return clause
 
 
 def _normalized(text: str) -> str:
@@ -113,9 +128,9 @@ def render_schema(db_id: str) -> str:
                 col_lines.append(line)
             for fk in conn.execute(f"PRAGMA foreign_key_list({_q(t)})"):
                 # (id, seq, ref_table, from, to, on_update, on_delete, match)
-                col_lines.append(
-                    f"  FOREIGN KEY ({_q(fk[3])}) REFERENCES {_q(fk[2])}({_q(fk[4])})"
-                )
+                clause = _render_foreign_key(fk)
+                if clause:
+                    col_lines.append(clause)
             parts.append(",\n".join(col_lines))
             parts.append(");")
     return "\n".join(parts)
