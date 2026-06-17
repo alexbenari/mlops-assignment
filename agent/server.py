@@ -8,6 +8,7 @@ agent's final SQL, the result rows, and per-iteration history.
 """
 from __future__ import annotations
 
+import logging
 import os
 from typing import Any
 
@@ -30,6 +31,7 @@ if os.environ.get("LANGFUSE_PUBLIC_KEY") and os.environ.get("LANGFUSE_SECRET_KEY
 
 
 app = FastAPI()
+logger = logging.getLogger(__name__)
 
 
 class AnswerRequest(BaseModel):
@@ -68,6 +70,11 @@ def answer(req: AnswerRequest) -> AnswerResponse:
     try:
         final = graph.invoke(state, config=config)
     except Exception as e:  # noqa: BLE001
+        logger.exception(
+            "Agent request failed for db=%s question=%r",
+            req.db,
+            req.question[:200],
+        )
         raise HTTPException(status_code=500, detail=f"{type(e).__name__}: {e}")
 
     sql = final.get("sql", "")
