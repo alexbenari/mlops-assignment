@@ -12,6 +12,8 @@ from dataclasses import dataclass
 
 from agent.schema import db_path
 
+SQLITE_PROGRESS_CHECK_OPCODES = 1_000
+
 
 @dataclass
 class ExecutionResult:
@@ -56,7 +58,7 @@ def execute_sql(db_id: str, sql: str, timeout_seconds: float = 5.0) -> Execution
         ) as conn:
             # Enforce a real wall-clock deadline on the statement itself rather
             # than only waiting for SQLite lock acquisition.
-            conn.set_progress_handler(_progress_handler, 10_000)
+            conn.set_progress_handler(_progress_handler, SQLITE_PROGRESS_CHECK_OPCODES)
             cur = conn.execute(sql)
             cols = [d[0] for d in cur.description] if cur.description else []
             rows = cur.fetchall()
