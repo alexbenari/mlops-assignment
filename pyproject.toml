@@ -22,7 +22,7 @@ dependencies = [
     "aiohttp>=3.9,<4.0",
     "tqdm>=4.66,<5.0",
     "transformers>=4.55.2,<5",
-    "bitsandbytes>=0.46.1",
+    "flashinfer-python>=0.2.3 ; sys_platform == 'linux'",
 ]
 
 [build-system]
