@@ -21,4 +21,4 @@ exec "$UV_BIN" run python -m vllm.entrypoints.openai.api_server \
     --generation-config vllm \
     --gpu-memory-utilization 0.9 \
     --max-model-len 12288 \
-    --max-num-seqs 35 
+    --max-num-seqs 50 
