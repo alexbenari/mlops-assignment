@@ -7,9 +7,12 @@ to decide whether the answer looks plausible.
 from __future__ import annotations
 
 import sqlite3
+import time
 from dataclasses import dataclass
 
 from agent.schema import db_path
+
+SQLITE_PROGRESS_CHECK_OPCODES = 1_000
 
 
 @dataclass
@@ -37,15 +40,30 @@ class ExecutionResult:
 def execute_sql(db_id: str, sql: str, timeout_seconds: float = 5.0) -> ExecutionResult:
     """Run SQL against db_id's sqlite, return result or error."""
     path = db_path(db_id)
+    deadline = time.monotonic() + timeout_seconds
+    timed_out = False
+
+    def _progress_handler() -> int:
+        nonlocal timed_out
+        if time.monotonic() >= deadline:
+            timed_out = True
+            return 1
+        return 0
+
     try:
         with sqlite3.connect(
             f"file:{path}?mode=ro",
             uri=True,
-            timeout=timeout_seconds,
+            timeout=0.0,
         ) as conn:
+            # Enforce a real wall-clock deadline on the statement itself rather
+            # than only waiting for SQLite lock acquisition.
+            conn.set_progress_handler(_progress_handler, SQLITE_PROGRESS_CHECK_OPCODES)
             cur = conn.execute(sql)
             cols = [d[0] for d in cur.description] if cur.description else []
             rows = cur.fetchall()
             return ExecutionResult(ok=True, rows=rows, columns=cols, row_count=len(rows))
     except Exception as e:  # noqa: BLE001
+        if timed_out:
+            return ExecutionResult(ok=False, error=f"QueryTimeout: exceeded {timeout_seconds:.1f}s")
         return ExecutionResult(ok=False, error=f"{type(e).__name__}: {e}")
