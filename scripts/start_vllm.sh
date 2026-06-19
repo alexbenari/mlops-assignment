@@ -19,8 +19,6 @@ exec "$UV_BIN" run python -m vllm.entrypoints.openai.api_server \
     --port 8000 \
     --reasoning-parser qwen3 \
     --generation-config vllm \
-    --dtype bfloat16 \
-    --quantization bitsandbytes \
     --gpu-memory-utilization 0.9 \
     --max-model-len 12288 \
     --max-num-seqs 50 
