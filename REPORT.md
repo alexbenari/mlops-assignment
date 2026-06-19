@@ -39,6 +39,7 @@ Hosted vLLM launch command:
   --generation-config vllm \
   --gpu-memory-utilization 0.9 \
   --max-model-len 12288
+  --max-num-seqs 50
 ```
 
 Flag rationale:
@@ -50,6 +51,7 @@ Flag rationale:
 - `--generation-config vllm`: use vllm's defaults for model serving, not the ones from HF in order to make the setup explicit
 - `--gpu-memory-utilization 0.9`: Uses ~90% of total GPU memory for the model runtime, mainly when sizing KV cache and related allocations. This is the recommended initial value for this setting in the docs, and there was no need to further tune it per the results below.
 - `--max-model-len 12288`: gives enough headroom for the agent's schema-heavy prompts without paying the extra KV-cache cost of a much larger context window. Based on the data provided about expected query lengts, plus headroom. Could likely have been reduced somewhat, but results below show that was not a priority.  
+- --max-num-seqs 50: limits the number of concurrent sequences vllm processes simultaneously. This was added during optimization phases to improve throughput.
 
 ## Baseline eval
 {
