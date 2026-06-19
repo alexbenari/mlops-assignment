@@ -153,6 +153,8 @@ Result: Memory usage decreased significantly as expected, but inference speed di
 Bottom line: SLO was not achieved. Using the final non-quantized configuration described above, achieved throughput was `8.33 RPS` versus the `10.0 RPS` target, a shortfall of `1.67 RPS` (`16.7%` below target). P95 end-to-end latency was `117.37s` versus the `5.0s` target, missing by `112.37s` (`23.5x` over target).
 Main reason: long tail of long-running agent requests (verify, execute SQL, revise). The correct optimization path is to improve the agent itself. The vLLM setup looks close to optimal at this point and cannot be further optimized or even effectively utilized (e.g. KV cache does not exceed 55%) because of agent-side issues.
 
+Submission note: instead of a single `screenshots/grafana_after.png`, this submission includes three Phase 6 "after" snapshots: `screenshots/phase6-iter-1-grafana-after.png`, `screenshots/phase6-iter-4-grafana-after.png`, and `screenshots/phase6-iter-5-grafana-after.png`. Each is cited above at the iteration where it was used as evidence.
+
 ## Future
 Given more time, I would focus on the core problem - long agent loops. I would work on the prompts to make the agent converge in fewer iterations, and fail fast when it is not converging. Examples:
 - Improve first-try SQL quality
