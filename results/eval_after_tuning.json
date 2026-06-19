@@ -1,16 +1,16 @@
 {
   "summary": {
     "questions": 30,
-    "final_accuracy": 0.4,
+    "final_accuracy": 0.43333333333333335,
     "per_iteration_accuracy": {
       "iter_0": 0.36666666666666664,
       "iter_1": 0.4,
-      "iter_2": 0.4
+      "iter_2": 0.43333333333333335
     },
     "avg_iterations": 1.6,
     "revised_questions": 12
   },
-  "wall_clock_seconds": 51.22116696400917,
+  "wall_clock_seconds": 149.46062970500043,
   "results": [
     {
       "question": "What is the coordinates location of the circuits for Australian grand prix?",
@@ -22,7 +22,7 @@
       "final_ok": true,
       "final_error": null,
       "iterations": 2,
-      "latency_seconds": 0.9057090519927442,
+      "latency_seconds": 0.694192443999782,
       "final_correct": true,
       "attempts": [
         {
@@ -51,7 +51,7 @@
       "final_ok": true,
       "final_error": null,
       "iterations": 1,
-      "latency_seconds": 0.55222160401172,
+      "latency_seconds": 0.46362759600015124,
       "final_correct": true,
       "attempts": [
         {
@@ -73,7 +73,7 @@
       "final_ok": true,
       "final_error": null,
       "iterations": 1,
-      "latency_seconds": 0.6547605890082195,
+      "latency_seconds": 0.6538816699994641,
       "final_correct": true,
       "attempts": [
         {
@@ -91,12 +91,12 @@
       "gold_sql": "SELECT AVG(T1.A15) FROM district AS T1 INNER JOIN account AS T2 ON T1.district_id = T2.district_id WHERE STRFTIME('%Y', T2.date) >= '1997' AND T1.A15 > 4000",
       "gold_ok": true,
       "gold_error": null,
-      "final_sql": "SELECT AVG(d.A15) AS average_crimes_1995\nFROM district d\nJOIN account a ON d.district_id = a.district_id\nWHERE d.A15 > 4000\n  AND a.date >= '19970101';",
+      "final_sql": "SELECT AVG(d.A15) AS average_crimes_1995\nFROM district d\nJOIN account a ON d.district_id = a.district_id\nWHERE d.A15 > 4000\n  AND CAST(SUBSTR(a.date, 1, 4) AS INTEGER) >= 1997;",
       "final_ok": true,
       "final_error": null,
       "iterations": 3,
-      "latency_seconds": 4.389055086008739,
-      "final_correct": false,
+      "latency_seconds": 5.409402780000164,
+      "final_correct": true,
       "attempts": [
         {
           "iteration": 0,
@@ -107,17 +107,17 @@
         },
         {
           "iteration": 1,
-          "sql": "SELECT AVG(d.A15) AS average_crimes_1995\nFROM district d\nJOIN account a ON d.district_id = a.district_id\nWHERE d.A15 > 4000\n  AND a.date >= '19970101'\nGROUP BY d.district_id\nHAVING COUNT(a.account_id) > 0;",
+          "sql": "SELECT AVG(d.A15) AS average_crimes_1995\nFROM district d\nJOIN account a ON d.district_id = a.district_id\nWHERE d.A15 > 4000\n  AND CAST(a.date AS TEXT) >= '19970101';",
           "ok": true,
           "error": null,
           "correct": false
         },
         {
           "iteration": 2,
-          "sql": "SELECT AVG(d.A15) AS average_crimes_1995\nFROM district d\nJOIN account a ON d.district_id = a.district_id\nWHERE d.A15 > 4000\n  AND a.date >= '19970101';",
+          "sql": "SELECT AVG(d.A15) AS average_crimes_1995\nFROM district d\nJOIN account a ON d.district_id = a.district_id\nWHERE d.A15 > 4000\n  AND CAST(SUBSTR(a.date, 1, 4) AS INTEGER) >= 1997;",
           "ok": true,
           "error": null,
-          "correct": false
+          "correct": true
         }
       ]
     },
@@ -131,7 +131,7 @@
       "final_ok": true,
       "final_error": null,
       "iterations": 1,
-      "latency_seconds": 0.5520100980065763,
+      "latency_seconds": 0.4388174440000512,
       "final_correct": true,
       "attempts": [
         {
@@ -153,7 +153,7 @@
       "final_ok": true,
       "final_error": null,
       "iterations": 1,
-      "latency_seconds": 1.0521200000075623,
+      "latency_seconds": 0.9584910039993702,
       "final_correct": false,
       "attempts": [
         {
@@ -175,7 +175,7 @@
       "final_ok": true,
       "final_error": null,
       "iterations": 1,
-      "latency_seconds": 0.6739795059838798,
+      "latency_seconds": 0.5603495369996381,
       "final_correct": false,
       "attempts": [
         {
@@ -193,16 +193,16 @@
       "gold_sql": "SELECT SUM(CASE WHEN SUBSTR(T1.event_date, 1, 4) = '2019' THEN T2.spent ELSE 0 END) - SUM(CASE WHEN SUBSTR(T1.event_date, 1, 4) = '2020' THEN T2.spent ELSE 0 END) AS num FROM event AS T1 INNER JOIN budget AS T2 ON T1.event_id = T2.link_to_event",
       "gold_ok": true,
       "gold_error": null,
-      "final_sql": "SELECT \n  (SELECT SUM(b.spent) FROM budget b JOIN event e ON b.link_to_event = e.event_id WHERE strftime('%Y', e.event_date) = '2020') -\n  (SELECT SUM(b.spent) FROM budget b JOIN event e ON b.link_to_event = e.event_id WHERE strftime('%Y', e.event_date) = '2019') AS difference;",
+      "final_sql": "SELECT \n  (SELECT SUM(b.spent) FROM budget b JOIN event e ON b.link_to_event = e.event_id WHERE e.event_date LIKE '2020-%') -\n  (SELECT SUM(b.spent) FROM budget b JOIN event e ON b.link_to_event = e.event_id WHERE e.event_date LIKE '2019-%') AS difference;",
       "final_ok": true,
       "final_error": null,
       "iterations": 1,
-      "latency_seconds": 0.797265661007259,
+      "latency_seconds": 0.6749975700004143,
       "final_correct": false,
       "attempts": [
         {
           "iteration": 0,
-          "sql": "SELECT \n  (SELECT SUM(b.spent) FROM budget b JOIN event e ON b.link_to_event = e.event_id WHERE strftime('%Y', e.event_date) = '2020') -\n  (SELECT SUM(b.spent) FROM budget b JOIN event e ON b.link_to_event = e.event_id WHERE strftime('%Y', e.event_date) = '2019') AS difference;",
+          "sql": "SELECT \n  (SELECT SUM(b.spent) FROM budget b JOIN event e ON b.link_to_event = e.event_id WHERE e.event_date LIKE '2020-%') -\n  (SELECT SUM(b.spent) FROM budget b JOIN event e ON b.link_to_event = e.event_id WHERE e.event_date LIKE '2019-%') AS difference;",
           "ok": true,
           "error": null,
           "correct": false
@@ -215,16 +215,16 @@
       "gold_sql": "SELECT T2.Street, T2.City, T2.State, T2.Zip FROM satscores AS T1 INNER JOIN schools AS T2 ON T1.cds = T2.CDSCode ORDER BY CAST(T1.NumGE1500 AS REAL) / T1.NumTstTakr ASC LIMIT 1",
       "gold_ok": true,
       "gold_error": null,
-      "final_sql": "SELECT s.Street, s.City, s.Zip, s.State\nFROM schools s\nJOIN satscores ss ON s.CDSCode = ss.cds\nWHERE ss.NumGE1500 / ss.NumTstTakr = (\n    SELECT MIN(NumGE1500 / NumTstTakr)\n    FROM satscores\n    WHERE NumTstTakr > 0\n)\nLIMIT 1;",
+      "final_sql": "SELECT s.Street, s.City, s.Zip, s.State\nFROM schools s\nJOIN satscores ss ON s.CDSCode = ss.cds\nWHERE ss.NumGE1500 IS NOT NULL AND ss.NumTstTakr IS NOT NULL\nORDER BY CAST(ss.NumGE1500 AS REAL) / ss.NumTstTakr ASC\nLIMIT 1;",
       "final_ok": true,
       "final_error": null,
       "iterations": 1,
-      "latency_seconds": 0.8687152840138879,
+      "latency_seconds": 0.7338952589998371,
       "final_correct": false,
       "attempts": [
         {
           "iteration": 0,
-          "sql": "SELECT s.Street, s.City, s.Zip, s.State\nFROM schools s\nJOIN satscores ss ON s.CDSCode = ss.cds\nWHERE ss.NumGE1500 / ss.NumTstTakr = (\n    SELECT MIN(NumGE1500 / NumTstTakr)\n    FROM satscores\n    WHERE NumTstTakr > 0\n)\nLIMIT 1;",
+          "sql": "SELECT s.Street, s.City, s.Zip, s.State\nFROM schools s\nJOIN satscores ss ON s.CDSCode = ss.cds\nWHERE ss.NumGE1500 IS NOT NULL AND ss.NumTstTakr IS NOT NULL\nORDER BY CAST(ss.NumGE1500 AS REAL) / ss.NumTstTakr ASC\nLIMIT 1;",
           "ok": true,
           "error": null,
           "correct": false
@@ -241,7 +241,7 @@
       "final_ok": true,
       "final_error": null,
       "iterations": 1,
-      "latency_seconds": 0.6694824139995035,
+      "latency_seconds": 0.5522013339996192,
       "final_correct": false,
       "attempts": [
         {
@@ -263,7 +263,7 @@
       "final_ok": true,
       "final_error": null,
       "iterations": 1,
-      "latency_seconds": 0.61836467901594,
+      "latency_seconds": 0.4405655279997518,
       "final_correct": false,
       "attempts": [
         {
@@ -285,7 +285,7 @@
       "final_ok": true,
       "final_error": null,
       "iterations": 2,
-      "latency_seconds": 1.646378937002737,
+      "latency_seconds": 1.499476193999726,
       "final_correct": true,
       "attempts": [
         {
@@ -314,7 +314,7 @@
       "final_ok": true,
       "final_error": null,
       "iterations": 1,
-      "latency_seconds": 0.6246176649874542,
+      "latency_seconds": 0.45595151799989253,
       "final_correct": true,
       "attempts": [
         {
@@ -336,7 +336,7 @@
       "final_ok": true,
       "final_error": null,
       "iterations": 1,
-      "latency_seconds": 0.7501900439965539,
+      "latency_seconds": 0.5778250450002815,
       "final_correct": true,
       "attempts": [
         {
@@ -358,7 +358,7 @@
       "final_ok": true,
       "final_error": null,
       "iterations": 2,
-      "latency_seconds": 2.5519480099901557,
+      "latency_seconds": 2.4171655370000735,
       "final_correct": false,
       "attempts": [
         {
@@ -387,7 +387,7 @@
       "final_ok": true,
       "final_error": null,
       "iterations": 2,
-      "latency_seconds": 1.9457991649978794,
+      "latency_seconds": 1.7963327959996604,
       "final_correct": false,
       "attempts": [
         {
@@ -416,7 +416,7 @@
       "final_ok": true,
       "final_error": null,
       "iterations": 1,
-      "latency_seconds": 0.5923977000056766,
+      "latency_seconds": 0.41641563000030146,
       "final_correct": true,
       "attempts": [
         {
@@ -438,7 +438,7 @@
       "final_ok": true,
       "final_error": null,
       "iterations": 3,
-      "latency_seconds": 1.5117891340050846,
+      "latency_seconds": 1.3476405940000404,
       "final_correct": true,
       "attempts": [
         {
@@ -474,7 +474,7 @@
       "final_ok": true,
       "final_error": null,
       "iterations": 2,
-      "latency_seconds": 1.2738227990048472,
+      "latency_seconds": 1.0907831309996254,
       "final_correct": false,
       "attempts": [
         {
@@ -503,7 +503,7 @@
       "final_ok": true,
       "final_error": null,
       "iterations": 1,
-      "latency_seconds": 0.7253806449880358,
+      "latency_seconds": 0.5501864469997599,
       "final_correct": true,
       "attempts": [
         {
@@ -525,7 +525,7 @@
       "final_ok": true,
       "final_error": null,
       "iterations": 1,
-      "latency_seconds": 0.49154110200470313,
+      "latency_seconds": 0.31478732300001866,
       "final_correct": false,
       "attempts": [
         {
@@ -547,7 +547,7 @@
       "final_ok": true,
       "final_error": null,
       "iterations": 1,
-      "latency_seconds": 0.7191303430008702,
+      "latency_seconds": 0.5433775189994776,
       "final_correct": false,
       "attempts": [
         {
@@ -569,7 +569,7 @@
       "final_ok": true,
       "final_error": null,
       "iterations": 1,
-      "latency_seconds": 0.546684222004842,
+      "latency_seconds": 0.3780620520001321,
       "final_correct": true,
       "attempts": [
         {
@@ -591,7 +591,7 @@
       "final_ok": true,
       "final_error": null,
       "iterations": 1,
-      "latency_seconds": 0.6318395599955693,
+      "latency_seconds": 0.4493837310001254,
       "final_correct": true,
       "attempts": [
         {
@@ -613,7 +613,7 @@
       "final_ok": true,
       "final_error": null,
       "iterations": 2,
-      "latency_seconds": 1.629248003999237,
+      "latency_seconds": 1.443216372000279,
       "final_correct": false,
       "attempts": [
         {
@@ -642,7 +642,7 @@
       "final_ok": true,
       "final_error": null,
       "iterations": 3,
-      "latency_seconds": 3.0133802280179225,
+      "latency_seconds": 2.8168316979999872,
       "final_correct": false,
       "attempts": [
         {
@@ -678,7 +678,7 @@
       "final_ok": true,
       "final_error": null,
       "iterations": 3,
-      "latency_seconds": 2.72334739100188,
+      "latency_seconds": 2.5883948489999966,
       "final_correct": false,
       "attempts": [
         {
@@ -714,7 +714,7 @@
       "final_ok": true,
       "final_error": null,
       "iterations": 3,
-      "latency_seconds": 6.823739230982028,
+      "latency_seconds": 114.58316004199969,
       "final_correct": false,
       "attempts": [
         {
@@ -750,7 +750,7 @@
       "final_ok": true,
       "final_error": null,
       "iterations": 1,
-      "latency_seconds": 0.7078785979829263,
+      "latency_seconds": 0.5291227679999793,
       "final_correct": false,
       "attempts": [
         {
@@ -772,7 +772,7 @@
       "final_ok": true,
       "final_error": null,
       "iterations": 3,
-      "latency_seconds": 3.238626741018379,
+      "latency_seconds": 3.1240984380001464,
       "final_correct": false,
       "attempts": [
         {

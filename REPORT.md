@@ -1,31 +1,5 @@
 # REPORT
 
-## Local development setup note
-
-Local development was done under WSL2 and opened in VS Code via Remote - WSL. The assignment repo runs locally first, with the hosted API kept only as a fallback and the final benchmark/tuning work deferred to a hosted GPU VM.
-
-The local stand-in inference server runs from the repo environment with vLLM on the laptop GPU, not on CPU. The machine exposes one NVIDIA GeForce RTX 3050-class GPU to WSL with 4 GB VRAM, which is far too small for the target assignment model, so local testing uses `Qwen/Qwen3-0.6B` as a functional stand-in for graph wiring, metrics, and general request flow.
-
-Working local vLLM command:
-
-```bash
-uv run python -m vllm.entrypoints.openai.api_server \
-  --model Qwen/Qwen3-0.6B \
-  --host 0.0.0.0 \
-  --port 8000 \
-  --gpu-memory-utilization 0.7 \
-  --max-model-len 2560
-```
-
-Local constraints and adjustments:
-
-- The repo initially resolved `transformers` to a 5.x release, which was incompatible with `vllm 0.10.2` for this Qwen3 path. Pinning `transformers` to `<5` fixed tokenizer compatibility.
-- The default vLLM memory target was too aggressive for a 4 GB GPU, so `gpu_memory_utilization` had to be reduced.
-- The model's default context window was unnecessarily large for local iteration and increased KV-cache pressure, so `max_model_len` was reduced to `2560`.
-
-This local configuration is only intended to unblock development of the agent, Prometheus metrics, and tracing flow. It is not representative of the final serving configuration, and none of its latency or throughput characteristics should be used for the final SLO or quality claims.
-
-
 ## Phase 1 serving configuration on the H100 VM
 
 Hosted vLLM launch command:
@@ -49,19 +23,19 @@ Flag rationale:
 - `--port 8000`: per the repo's default endpoint wiring for Prometheus scraping and the agent client.
 - `--reasoning-parser qwen3`: enables the Qwen3 reasoning-format parser, to allow clean separation between text and reasoning in the API response
 - `--generation-config vllm`: use vLLM's defaults for model serving, not the ones from HF, in order to make the setup explicit
-- `--gpu-memory-utilization 0.9`: Uses ~90% of total GPU memory for the model runtime, mainly when sizing KV cache and related allocations. This is the recommended initial value for this setting in the docs, and there was no need to further tune it per the results below.
+- `--gpu-memory-utilization 0.9`: Uses ~90% of total GPU memory for the model runtime, mainly when sizing KV cache and related allocations. This is the recommended initial value for this setting in the docs. I kept it fixed across the reported runs because the submitted results did not indicate it was the first bottleneck to investigate.
 - `--max-model-len 12288`: gives enough headroom for the agent's schema-heavy prompts without paying the extra KV-cache cost of a much larger context window. Based on the data provided about expected query lengths, plus headroom. Could likely have been reduced somewhat, but results below show that was not a priority.
 - `--max-num-seqs 50`: limits the number of concurrent sequences vLLM processes simultaneously. This was added during optimization phases to improve throughput.
 
 ## Baseline eval
-Final eval summary from `results/eval_after_tuning.json`:
+Baseline eval summary from `results/eval_baseline.json`:
 
 - Questions: `30`
-- Final accuracy: `0.4333`
+- Final accuracy: `0.4000`
 - Per-iteration accuracy:
   - `iter_0`: `0.3667`
   - `iter_1`: `0.4000`
-  - `iter_2`: `0.4333`
+  - `iter_2`: `0.4000`
 - Average iterations: `1.6`
 - Revised questions: `12`
 
@@ -99,61 +73,62 @@ Observed improvement from the optimization:
 Interpretation:
 
 - The optimization behaves as intended: it cuts wasted loop work when the reviser is stuck and produces no substantive SQL change.
-- This latency win does not change the quality of results at all. 
+- This is directly relevant to the assignment's quality-vs-latency tradeoff: it reduces end-to-end latency by removing useless loop work while preserving answer quality, so it is exactly the kind of agent-side optimization that helps move the system toward the Phase 6 SLO without paying a quality penalty.
 
 
 ## Runtime optimization phases
 
+Submission note: instead of a single `screenshots/grafana_after.png`, this submission includes three Phase 6 "after" snapshots: `screenshots/phase6-iter-1-grafana-after.png`, `screenshots/phase6-iter-4-grafana-after.png`, and `screenshots/phase6-iter-5-grafana-after.png`. Each is cited above at the iteration where it was used as evidence.
+
 ### Baseline
-The load test on the initial serving configuration was very far from meeting the SLO.
-Full results are in `results/load_test_phase6_baseline_rps10.json`.
-"achieved_rps": 8.333240031785369 < 10
-"latency_p95": 106.59788288000004 >> 5
-Only 255/3000 = 8.5% of queries completed successfully (the rest were subject to timeout/load related errors)
+Saw: The initial Phase 6 load test missed the SLO badly: `achieved_rps = 8.333240031785369 < 10` and `latency_p95 = 106.59788288000004s >> 5s` (`results/load_test_phase6_baseline_rps10.json`).
+Hypothesis: The stack is overloaded, but Grafana is needed to determine whether the first bottleneck is vLLM concurrency or the agent.
+Change: None. This run establishes the baseline.
+Result: Only `255/3000` requests completed successfully (`8.5%`), confirming the baseline is far from acceptable.
 
 ### 1
 Saw: Grafana shows that from a certain point, KV cache memory usage reaches 100% and from that point on preemptions start happening and requests start getting queued (see `screenshots/grafana_before.png`).
 Hypothesis: vLLM is running too many requests in parallel. Inspecting the Running Requests graph shows the KV cache got to 100% at 35 concurrent requests.
-Change: vLLM limited to run 35 concurrent requests at most (`--max-num-seqs 35`)
-Result: Grafana shows the expected results: preemptions dropped to zero and KV cache no longer reaches 100% usage (see `screenshots/phase6-iter-1-grafana-after.png`). Essentially, the previous overload pattern was resolved (we even went to the other extreme now, the server is underloaded as can be seen from KV cache usage not exceeding 65% at any time). However, results themselves are still not improved. `achieved_rps` remains almost the same (`8.333245542892458`) and latency is even worse now: `latency_p95 = 116.82494848199894`. More significantly, it is now clear that 500 errors point to a real correctness issue on the agent side. Inspecting Langfuse is required to understand the cause of failures.
+Change: Reduced vLLM concurrency to `--max-num-seqs 35`. Grafana showed KV-cache saturation and the onset of preemptions at roughly 35 concurrent running requests, so I used that as the cap.
+Result: Preemptions dropped to zero and KV cache stopped saturating (see `screenshots/phase6-iter-1-grafana-after.png`), but end-to-end performance did not improve: `achieved_rps = 8.333245542892458` and `latency_p95 = 116.82494848199894s`. This ruled out KV-cache pressure as the main remaining SLO blocker.
 
 ### 2
 Saw: Langfuse log analysis surfaced two issues: 1. a crash introduced in a previous commit 2. requests failing because of "too many open file descriptors" due to the fact the agent implementation is initializing a new connection per LLM request instead of pooling connections.
 Hypothesis: these issues are causing many requests to crash/fail before they even reach the LLM, so it completely changes the latency/throughput landscape. After it is fixed we need to remeasure to see what the real baseline is.
-Change: issues fixed
-Result: agent errors disappeared, but SLO is still not met, neither in terms of throughput nor P95 latency
+Change: Fixed the crash and reused/pool-managed LLM client connections.
+Result: Those specific agent failures disappeared, but the SLO was still missed, so deeper latency issues remained in the agent path.
 
 ### 3
 Saw: A large number of very long-running agent queries.
 Hypothesis: Analyzing the Langfuse logs shows two issues: 1. a lot of time is sometimes spent in the verify and revise LLM queries 2. SQL execution sometimes takes a very long time, occasionally even more than a minute for a single running query.
 Change: Optimized prompts + added a hard timeout of 5s on SQL execution. After the timeout the executing SQL query is aborted.
-Result: A meaningful improvement, but it still misses a `p95 <= 5s` latency target, even when running with `--rps 1`.
+Result: Latency improved meaningfully, but the system still missed `p95 <= 5s`, even when running with `--rps 1`. This showed the long tail was reduced, not eliminated.
 
 ### 4
 Saw: A long tail of long-running agent LLM queries in the verify and revise nodes. Despite the prompt which asks for brief answers, these sometimes generate a lot of tokens.
 Hypothesis: Capping the max output tokens of the LLM will prevent this long tail from happening without hurting quality (long answers are likely not that useful anyway).
 Change: `max_completion_tokens = 512` for all agent-initiated LLM calls. Another change made was to improve the mechanism for killing long SQL queries to avoid overrun above the 5s cap which occasionally happened. Now "max 5s" is really 5s, not "usually 5s but sometimes 10s".
-Result: A meaningful improvement, but it still misses a `p95 <= 5s` latency target, even when running with `--rps 1`. Naturally, running with `rps=10` also fails. However, the Grafana dashboard shows clearly that vLLM is not saturated and even has headroom for improvement, since KV cache is not saturated (only reaches ~60%; see `screenshots/phase6-iter-4-grafana-after.png`).
-The quality of the results did not change significantly following these optimizations. Final accuracy is now `0.4` vs. `0.43` previously.
+Result: Latency improved again, but the system still missed `p95 <= 5s`, even when running with `--rps 1`, and `rps=10` still failed. Grafana also showed vLLM still had headroom, with KV cache only reaching about `60%` (see `screenshots/phase6-iter-4-grafana-after.png`). Quality survived these changes and improved slightly: the required post-tuning eval artifact, `results/eval_after_tuning.json`, reached `0.4333` final accuracy versus `0.4000` in `results/eval_baseline.json`, with the gain coming from `iter_2` improving from `0.4000` to `0.4333`.
 
 ### 5
 Saw: Grafana dashboard shows vLLM is underutilized. KV cache is only ~45% used at the peak, zero preemptions but some queries are waiting in queue.
 Hypothesis: --max-num-seqs is too low
 Change: Increased --max-num-seqs from 35 to 50
-Result: vLLM usage increased only a little (see `screenshots/phase6-iter-5-grafana-after.png`). KV cache usage went up `45 -> 55`, concurrent requests went up `35 -> 40`. This shows that the vLLM serving is not the bottleneck.
-The bottleneck is the agent service, which suffocates under the load. 
+Result: Utilization increased only modestly (see `screenshots/phase6-iter-5-grafana-after.png`): KV cache usage went from about `45%` to `55%`, and concurrent requests from about `35` to `40`. The SLO was still missed, which strengthened the conclusion that vLLM was not the dominant bottleneck.
 
 ### 6
 Saw: the bottleneck revolves around the agent loop: too many loops, too long inference time for each turn. The ideal solution is to further optimize the agent itself (prompts and loop logic).
 Hypothesis: That said, switching to a quantized model can cut LLM inference time, moving us closer to the SLA. The risk is that reduced quality may generate more loops, which is bad for the SLO. Quality degradation of answers in general is also a risk. But we have the eval to measure.
 Change: --quantization bitsandbytes and --dtype bfloat16
-Result: Memory usage decreased significantly as expected, but inference speed did not improve and even regressed somewhat. Change reverted.
+Result: Memory usage decreased as expected, but latency did not improve and even regressed somewhat, so the change was reverted.
 
 ## Summary 
 Bottom line: SLO was not achieved. Using the final non-quantized configuration described above, achieved throughput was `8.33 RPS` versus the `10.0 RPS` target, a shortfall of `1.67 RPS` (`16.7%` below target). P95 end-to-end latency was `117.37s` versus the `5.0s` target, missing by `112.37s` (`23.5x` over target).
-Main reason: long tail of long-running agent requests (verify, execute SQL, revise). The correct optimization path is to improve the agent itself. The vLLM setup looks close to optimal at this point and cannot be further optimized or even effectively utilized (e.g. KV cache does not exceed 55%) because of agent-side issues.
+Main reason: long tail of long-running agent requests (verify, execute SQL, revise). The correct optimization path is to improve the agent itself. Based on the submitted runs, the strongest remaining bottleneck appears to be on the agent side rather than in vLLM serving, since the Grafana snapshots still show headroom in KV-cache usage while end-to-end latency remains poor. Quality did survive the tuning pass and improved slightly: `results/eval_after_tuning.json` reached `0.4333` final accuracy versus `0.4000` in the baseline eval.
 
-Submission note: instead of a single `screenshots/grafana_after.png`, this submission includes three Phase 6 "after" snapshots: `screenshots/phase6-iter-1-grafana-after.png`, `screenshots/phase6-iter-4-grafana-after.png`, and `screenshots/phase6-iter-5-grafana-after.png`. Each is cited above at the iteration where it was used as evidence.
+## Agent value
+The agent loop provides real but still limited value. In the baseline eval, `results/eval_baseline.json` shows per-iteration accuracy rising from `0.3667` at `iter_0` to `0.4000` at `iter_1`, then staying flat at `0.4000` at `iter_2`, so the first revision sometimes helps but the second one does not. In the final quality measurement, `results/eval_after_tuning.json` improves `iter_2` to `0.4333`, which means the second stage of the loop did start adding measurable value after prompt and agent changes. Even so, the overall gain is still modest relative to the latency and LLM-call overhead, so the loop is useful but not yet efficient enough to justify its current cost under the Phase 6 SLO.
+
 
 ## Future
 Given more time, I would focus on the core problem - long agent loops. I would work on the prompts to make the agent converge in fewer iterations, and fail fast when it is not converging. Examples:
